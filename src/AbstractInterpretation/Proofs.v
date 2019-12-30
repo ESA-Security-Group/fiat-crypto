@@ -33,12 +33,12 @@ Require Import Crypto.Util.Tactics.SpecializeBy.
 Require Import Crypto.Util.Tactics.SpecializeAllWays.
 Require Import Crypto.Util.Tactics.Head.
 Require Import Crypto.Util.Tactics.DoWithHyp.
-Require Import Crypto.Language.Language.
-Require Import Crypto.Language.Inversion.
-Require Import Crypto.Language.Wf.
+Require Import Rewriter.Language.Language.
+Require Import Rewriter.Language.Inversion.
+Require Import Rewriter.Language.Wf.
 Require Import Crypto.Language.API.
 Require Import Crypto.CastLemmas.
-Require Import Crypto.Language.UnderLetsProofs.
+Require Import Rewriter.Language.UnderLetsProofs.
 Require Import Crypto.AbstractInterpretation.AbstractInterpretation.
 Require Import Crypto.AbstractInterpretation.Wf.
 Require Import Crypto.AbstractInterpretation.ZRangeProofs.
@@ -163,7 +163,7 @@ Module Compilers.
         : @abstract_domain'_R t y y.
       Proof using abstract_domain'_R_symmetric abstract_domain'_R_transitive. eapply PER_valid_r; eassumption. Qed.
 
-      Local Hint Immediate abstract_domain'_R_refl_of_rel_l abstract_domain'_R_refl_of_rel_r.
+      Local Hint Immediate abstract_domain'_R_refl_of_rel_l abstract_domain'_R_refl_of_rel_r : core.
 
       Local Instance abstract_domain_R_Symmetric {t} : Symmetric (@abstract_domain_R t) := _ : Symmetric (type.related _).
       Local Instance abstract_domain_R_Transitive {t} : Transitive (@abstract_domain_R t) := _ : Transitive (type.related _).
@@ -176,13 +176,13 @@ Module Compilers.
         : @abstract_domain_R t y y.
       Proof using abstract_domain'_R_symmetric abstract_domain'_R_transitive. eapply PER_valid_r; eassumption. Qed.
 
-      Local Hint Immediate abstract_domain_R_refl_of_rel_l abstract_domain_R_refl_of_rel_r.
+      Local Hint Immediate abstract_domain_R_refl_of_rel_l abstract_domain_R_refl_of_rel_r : core.
 
       Lemma related_bottom_for_each_lhs_of_arrow {t} v
         : type.and_for_each_lhs_of_arrow (@abstraction_relation) (@bottom_for_each_lhs_of_arrow t) v.
       Proof using bottom'_related. induction t; cbn; eauto. Qed.
 
-      Local Hint Immediate related_bottom_for_each_lhs_of_arrow.
+      Local Hint Immediate related_bottom_for_each_lhs_of_arrow : core.
 
       Fixpoint fill_in_bottom_for_arrows {t} : abstract_domain t -> abstract_domain t
         := match t with
@@ -208,7 +208,7 @@ Module Compilers.
         cbv [abstraction_relation]; induction t; cbn; cbv [respectful_hetero]; eauto.
       Qed.
 
-      Hint Resolve fill_in_bottom_for_arrows_bottom_related.
+      Hint Resolve fill_in_bottom_for_arrows_bottom_related : core.
 
       Local Instance fill_in_bottom_for_arrows_Proper {t} : Proper (abstract_domain_R ==> abstract_domain_R) (@fill_in_bottom_for_arrows t).
       Proof using bottom'_Proper.
@@ -222,7 +222,7 @@ Module Compilers.
 
       Lemma bottom_eqv_refl {t} : @bottom t == @bottom t.
       Proof using Type. apply bottom_eqv_Proper_refl. Qed.
-      Local Hint Resolve bottom_eqv_refl.
+      Local Hint Resolve bottom_eqv_refl : core.
 
       Local Instance fill_in_bottom_for_arrows_Proper_eqv {t} : Proper (type.eqv ==> type.eqv) (@fill_in_bottom_for_arrows t).
       Proof using Type.
@@ -1058,7 +1058,7 @@ Module Compilers.
           : forall v, abstraction_relation' st v
                       -> expr.interp (@ident.interp) idc v = v.
         Proof using Hrelax.
-          repeat first [ progress cbv [annotate_expr Option.bind annotation_of_state option_map abstraction_relation' ZRange.type.base.option.is_bounded_by ZRange.type.base.is_bounded_by] in *
+          repeat first [ progress cbv [annotate_expr Crypto.Util.Option.bind annotation_of_state option_map abstraction_relation' ZRange.type.base.option.is_bounded_by ZRange.type.base.is_bounded_by] in *
                        | reflexivity
                        | progress inversion_option
                        | progress subst
@@ -1079,7 +1079,7 @@ Module Compilers.
           : @annotate_expr relax_zrange interp_type t st1 = @annotate_expr relax_zrange interp_type t st2.
         Proof using Type. congruence. Qed.
 
-        Local Hint Resolve interp_annotate_expr abstract_interp_ident_related.
+        Local Hint Resolve interp_annotate_expr abstract_interp_ident_related : core.
 
         Lemma interp_eval_with_bound
               {t} (e_st e1 e2 : expr t)

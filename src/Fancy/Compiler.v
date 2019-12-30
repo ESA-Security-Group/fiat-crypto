@@ -1,7 +1,7 @@
 Require Import Coq.ZArith.ZArith Coq.micromega.Lia.
 Require Import Coq.Lists.List. Import ListNotations.
-Require Import Crypto.Language.Wf. Import Language.Wf.Compilers.
-Require Import Crypto.Language.Inversion. Import Language.Inversion.Compilers.
+Require Import Rewriter.Language.Wf. Import Language.Wf.Compilers.
+Require Import Rewriter.Language.Inversion. Import Language.Inversion.Compilers.
 Require Import Crypto.Language.API. Import Language.API.Compilers.
 Import Compilers.API.
 Require Import Crypto.CastLemmas.
@@ -1211,9 +1211,9 @@ Section Proofs.
     |}.
 
 
-  Hint Resolve Pos.lt_trans Pos.lt_irrefl Pos.lt_succ_diag_r Pos.eqb_refl.
-  Hint Resolve in_or_app.
-  Hint Resolve make_consts_ok make_pairs_ok make_ctx_ok no_pairs.
+  Hint Resolve Pos.lt_trans Pos.lt_irrefl Pos.lt_succ_diag_r Pos.eqb_refl : core.
+  Hint Resolve in_or_app : core.
+  Hint Resolve make_consts_ok make_pairs_ok make_ctx_ok no_pairs : core.
   (* TODO : probably not all of these preconditions are necessary -- prune them sometime *)
   Lemma of_Expr_correct next_name consts_list arg_list error
         (carry_flag : bool)

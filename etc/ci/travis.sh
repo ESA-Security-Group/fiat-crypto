@@ -17,7 +17,7 @@ rm -f finished.ok
 (make "$@" TIMED=1 2>&1 && touch finished.ok) | tee -a time-of-build.log
 python "./etc/coq-scripts/timing/make-one-time-file.py" "time-of-build.log" "time-of-build-pretty.log" || exit $?
 rm -f "${CUR_ARCHIVE}"
-tar -czf "${CUR_ARCHIVE}" time-of-build.log src coqprime bedrock2 || exit $?
+tar -czf "${CUR_ARCHIVE}" time-of-build.log src coqprime bedrock2 rewriter || exit $?
 
 git update-index --assume-unchanged _CoqProject
 git status
@@ -27,6 +27,8 @@ cat time-of-build-pretty.log
 make "$@" TIMED=1 || exit $?
 
 if [ ! -z "$(git diff)" ]; then
+    git submodule foreach --recursive git diff
+    git submodule foreach --recursive git status
     git diff
     exit 1
 fi

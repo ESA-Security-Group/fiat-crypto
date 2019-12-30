@@ -2,9 +2,9 @@ Require Import Coq.Bool.Bool.
 Require Import Coq.derive.Derive.
 Require Import Coq.ZArith.ZArith Coq.micromega.Lia.
 Require Import Coq.Lists.List. Import ListNotations.
-Require Import Crypto.Language.Language. Import Language.Compilers.
+Require Import Rewriter.Language.Language. Import Language.Compilers.
 Require Import Crypto.Language.API. Import Language.API.Compilers.
-Require Import Crypto.Language.Wf.
+Require Import Rewriter.Language.Wf.
 Require Import Crypto.Arithmetic.FancyMontgomeryReduction.
 Require Import Crypto.PushButtonSynthesis.FancyMontgomeryReduction.
 Require Import Crypto.Fancy.Compiler.
@@ -256,7 +256,8 @@ Local Notation "i rd x y ; cont" := (Instr i rd (x, y) cont) (at level 40, cont 
 Local Notation "i rd x y z ; cont" := (Instr i rd (x, y, z) cont) (at level 40, cont at level 200, format "i  rd  x  y  z ; '//' cont").
 
 (* Montgomery reference code : *)
-Eval cbv beta iota delta [Prod.MontRed256 Prod.Mul256 Prod.Mul256x256] in Prod.MontRed256.
+Local Set Printing Width 150.
+Redirect "Crypto.Fancy.Montgomery256.Prod.MontRed256" Eval cbv beta iota delta [Prod.MontRed256 Prod.Mul256 Prod.Mul256x256] in Prod.MontRed256.
 (*
      = fun lo hi y t1 t2 scratch RegPInv : register =>
        MUL128LL y lo RegPInv;

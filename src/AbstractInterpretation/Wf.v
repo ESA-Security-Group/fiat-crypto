@@ -20,11 +20,11 @@ Require Import Crypto.Util.Tactics.SplitInContext.
 Require Import Crypto.Util.Tactics.UniquePose.
 Require Import Crypto.Util.Tactics.SpecializeBy.
 Require Import Crypto.Util.Tactics.SpecializeAllWays.
-Require Import Crypto.Language.Language.
-Require Import Crypto.Language.Inversion.
+Require Import Rewriter.Language.Language.
+Require Import Rewriter.Language.Inversion.
 Require Import Crypto.Language.InversionExtra.
-Require Import Crypto.Language.Wf.
-Require Import Crypto.Language.UnderLetsProofs.
+Require Import Rewriter.Language.Wf.
+Require Import Rewriter.Language.UnderLetsProofs.
 Require Import Crypto.AbstractInterpretation.AbstractInterpretation.
 Import Coq.Lists.List.
 
@@ -152,9 +152,9 @@ Module Compilers.
           destruct t; [ destruct v1, v2, Hv | ]; cbn in *; cbv [respectful]; eauto; intros; apply bottom_Proper.
         Qed.
 
-        Local Hint Resolve (ex_intro _ nil) (ex_intro _ (cons _ nil)).
-        Local Hint Constructors expr.wf ex.
-        Local Hint Unfold List.In.
+        Local Hint Resolve (ex_intro _ nil) (ex_intro _ (cons _ nil)) : core.
+        Local Hint Constructors expr.wf ex : core.
+        Local Hint Unfold List.In : core.
 
         Lemma wf_value_Proper_list G1 G2
               (HG1G2 : forall t v1 v2, List.In (existT _ t (v1, v2)) G1 -> List.In (existT _ t (v1, v2)) G2)
@@ -734,7 +734,7 @@ Module Compilers.
                        (@annotate_expr relax_zrange var2 t s2).
       Proof.
         intros ?; subst s2.
-        cbv [annotate_expr Option.bind option_eq]; break_innermost_match;
+        cbv [annotate_expr Crypto.Util.Option.bind option_eq]; break_innermost_match;
           repeat constructor.
       Qed.
 
@@ -747,8 +747,8 @@ Module Compilers.
         cbv [abstract_interp_ident abstract_domain_R type.related respectful type.interp]; intros idc idc' ?; subst idc'; destruct idc;
           repeat first [ reflexivity
                        | progress subst
-                       | progress cbn [ZRange.type.base.option.interp ZRange.type.base.interp base.interp base.base_interp Option.bind] in *
-                       | progress cbv [Option.bind]
+                       | progress cbn [ZRange.type.base.option.interp ZRange.type.base.interp base.interp base.base_interp Crypto.Util.Option.bind] in *
+                       | progress cbv [Crypto.Util.Option.bind]
                        | intro
                        | progress destruct_head'_prod
                        | progress destruct_head'_bool

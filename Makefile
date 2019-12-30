@@ -24,14 +24,17 @@ HIDE := $(if $(VERBOSE),,@)
 INSTALLDEFAULTROOT := Crypto
 
 .PHONY: coq clean update-_CoqProject cleanall install \
+	install-rewriter clean-rewriter rewriter \
 	install-coqprime clean-coqprime coqprime coqprime-all \
 	bedrock2 clean-bedrock2 install-bedrock2 coqutil clean-coqutil install-coqutil \
 	install-standalone install-standalone-ocaml install-standalone-haskell \
 	util c-files rust-files \
+	deps \
 	nobigmem print-nobigmem \
 	lite only-heavy printlite \
 	some-early pre-standalone standalone standalone-haskell standalone-ocaml \
-	test-c-files test-rust-files
+	test-c-files test-rust-files \
+	check-output accept-output
 
 -include Makefile.coq
 include etc/coq-scripts/Makefile.vo_closure
@@ -39,9 +42,10 @@ include etc/coq-scripts/Makefile.vo_closure
 .DEFAULT_GOAL := all
 
 SORT_COQPROJECT = sed 's,[^/]*/,~&,g' | env LC_COLLATE=C sort | sed 's,~,,g' | uniq
+WARNINGS := +implicit-core-hint-db,+implicits-in-term,+non-reversible-notation,+deprecated-intros-until-0,+deprecated-focus,+unused-intro-pattern
 update-_CoqProject::
 	$(SHOW)'ECHO > _CoqProject'
-	$(HIDE)(echo '-R $(SRC_DIR) $(MOD_NAME)'; (git ls-files 'src/*.v' | $(GREP_EXCLUDE_SPECIAL_VOFILES) | $(SORT_COQPROJECT))) > _CoqProject
+	$(HIDE)(echo '-R $(SRC_DIR) $(MOD_NAME)'; echo '-arg -w -arg $(WARNINGS)'; (git ls-files 'src/*.v' | $(GREP_EXCLUDE_SPECIAL_VOFILES) | $(SORT_COQPROJECT))) > _CoqProject
 
 # coq .vo files that are not compiled using coq_makefile
 SPECIAL_VOFILES := \
@@ -56,8 +60,6 @@ PERFTESTING_VO := \
 LITE_UNMADE_VOFILES := src/Curves/Weierstrass/AffineProofs.vo \
 	src/Curves/Weierstrass/Jacobian.vo \
 	src/Curves/Weierstrass/Projective.vo \
-	src/Rewriter/ProofsCommon.vo \
-	src/Rewriter/Wf.vo \
 	src/Rewriter/RulesGood.vo \
 	src/Rewriter/All.vo \
 	$(PERFTESTING_VO)
@@ -71,7 +73,7 @@ PRE_STANDALONE_PRE_VOFILES := $(filter src/Standalone%.vo,$(REGULAR_VOFILES))
 UTIL_PRE_VOFILES := $(filter src/Algebra/%.vo src/Tactics/%.vo src/Util/%.vo,$(REGULAR_VOFILES))
 SOME_EARLY_VOFILES := \
   src/Arithmetic/Core.vo \
-  src/Rewriter/Rewriter.vo
+  src/Rewriter/AllTacticsExtra.vo
 
 # computing the vo_reverse_closure is slow, so we only do it if we're
 # asked to make the lite target
@@ -104,8 +106,19 @@ FUNCTIONS_FOR_25519 := carry_mul carry_square carry_scmul121666 carry add sub op
 UNSATURATED_SOLINAS := src/ExtractionOCaml/unsaturated_solinas
 WORD_BY_WORD_MONTGOMERY := src/ExtractionOCaml/word_by_word_montgomery
 
+OUTPUT_VOS := \
+	src/Fancy/Montgomery256.vo \
+	src/Bedrock/CompilerTest.vo
 
-all: coq c-files rust-files
+OUTPUT_PREOUTS := \
+	Crypto.Bedrock.CompilerTest.X25519_64.mulmod_bedrock \
+	Crypto.Bedrock.CompilerTest.mulmod_bedrock.X25519_32 \
+	Crypto.Fancy.Montgomery256.Prod.MontRed256
+
+CHECK_OUTPUTS := $(addprefix check-,$(OUTPUT_PREOUTS))
+ACCEPT_OUTPUTS := $(addprefix accept-,$(OUTPUT_PREOUTS))
+
+all: coq standalone-ocaml c-files rust-files check-output
 coq: $(REGULAR_VOFILES)
 c-files: $(ALL_C_FILES)
 rust-files: $(ALL_RUST_FILES)
@@ -137,7 +150,8 @@ print-nobigmem::
 	@echo 'Files Not Made:'
 	@for i in $(sort $(NOBIGMEM_ALL_UNMADE_VOFILES)); do echo $$i; done
 
-OTHERFLAGS += -w "-notation-overridden"
+# Remove -undeclared-scope once we stop supporting 8.9
+OTHERFLAGS += -w -notation-overridden,-undeclared-scope
 ifneq ($(PROFILE),)
 OTHERFLAGS += -profile-ltac
 endif
@@ -154,6 +168,8 @@ EXTERNAL_DEPENDENCIES?=
 
 ifneq ($(EXTERNAL_DEPENDENCIES),1)
 
+REWRITER_FOLDER := rewriter
+REWRITER_SRC := $(REWRITER_FOLDER)/src
 COQPRIME_FOLDER := coqprime
 BEDROCK2_FOLDER := bedrock2/bedrock2
 BEDROCK2_SRC := $(BEDROCK2_FOLDER)/src
@@ -164,13 +180,16 @@ COQUTIL_NAME := coqutil
 # If we want to work on windows, we should probably figure out how to
 # use `;` rather than `:` when both we are on Windows AND OCaml is NOT
 # compiled via cygwin
-COQPATH?=${CURDIR_SAFE}/$(COQPRIME_FOLDER)/src:${CURDIR_SAFE}/$(BEDROCK2_SRC):${CURDIR_SAFE}/$(COQUTIL_SRC)
+COQPATH?=${CURDIR_SAFE}/$(COQPRIME_FOLDER)/src:${CURDIR_SAFE}/$(BEDROCK2_SRC):${CURDIR_SAFE}/$(COQUTIL_SRC):${CURDIR_SAFE}/$(REWRITER_SRC)
 export COQPATH
 
-$(VOFILES): | coqprime coqutil bedrock2
+deps: coqprime coqutil bedrock2 rewriter
+
+$(VOFILES): | coqprime coqutil bedrock2 rewriter
+
+$(ALLDFILES): | coqprime coqutil bedrock2 rewriter
 
 coqprime:
-	(cd $(COQPRIME_FOLDER) && $(COQBIN)coq_makefile -f _CoqProject -o Makefile)
 	$(MAKE) --no-print-directory -C $(COQPRIME_FOLDER) src/Coqprime/PrimalityTest/Zp.vo
 
 coqprime-all: coqprime
@@ -181,6 +200,15 @@ clean-coqprime:
 
 install-coqprime:
 	$(MAKE) --no-print-directory -C $(COQPRIME_FOLDER) install
+
+rewriter:
+	$(MAKE) --no-print-directory -C $(REWRITER_FOLDER)
+
+clean-rewriter:
+	$(MAKE) --no-print-directory -C $(REWRITER_FOLDER) clean
+
+install-rewriter:
+	$(MAKE) --no-print-directory -C $(REWRITER_FOLDER) install
 
 coqutil:
 	$(MAKE) --no-print-directory -C $(COQUTIL_FOLDER)
@@ -200,9 +228,9 @@ clean-bedrock2:
 install-bedrock2:
 	$(MAKE) --no-print-directory -C $(BEDROCK2_FOLDER) install
 
-cleanall:: clean-coqprime clean-bedrock2 clean-coqutil
+cleanall:: clean-coqprime clean-bedrock2 clean-coqutil clean-rewriter
 
-install: install-coqprime install-bedrock2 install-coqutil
+install: install-coqprime install-bedrock2 install-coqutil install-rewriter
 
 endif
 
@@ -422,8 +450,13 @@ include $(PERF_MAKEFILE)
 
 $(PERF_MAKEFILE): Makefile src/Rewriter/PerfTesting/Specific/make.py primes.txt
 	./src/Rewriter/PerfTesting/Specific/make.py primes.txt
-# PERF_TIMEOUT?=./etc/timeout -t 600 -m 10000 # limit to 10 GB # https://raw.githubusercontent.com/pshved/timeout/master/timeout
-PERF_TIMEOUT?=timeout 600
+PERF_MAX_TIME?=600 # 10 minutes
+PERF_MAX_MEM?=10000000 # 10 GB in kbytes
+PERF_MAX_STACK?=1000000
+PERF_TIMEOUT?=timeout $(PERF_MAX_TIME) # etc/timeout/timeout -m $(PERF_MAX_MEM) # limit to 10 GB # https://raw.githubusercontent.com/pshved/timeout/master/timeout
+# PERF_TIMEOUT?=timeout $(PERF_MAX_TIME)
+# apparently ulimit -m doesn't work anymore https://superuser.com/a/1497437/59575 / https://thirld.com/blog/2012/02/09/things-to-remember-when-using-ulimit/
+PERF_SET_LIMITS = ulimit -S -s $(PERF_MAX_STACK); ulimit -S -m $(PERF_MAX_MEM); ulimit -S -v $(PERF_MAX_MEM);
 
 .PHONY: perf perf-vos perf-extraction perf-standalone
 PERF_VOLOGS := $(PERF_PRIME_VOS:.vo=.log)
@@ -437,44 +470,86 @@ perf-vos: $(PERF_VOLOGS) \
 	$(PERF_MAKEFILE) \
 	src/Rewriter/PerfTesting/Core.vo \
 
+FILTER_OUT = $(foreach v,$(2),$(if $(findstring $(1),$(v)),,$(v)))
+FILTER = $(foreach v,$(2),$(if $(findstring $(1),$(v)),$(v),))
+.PHONY: perf-except-computed-vos
+perf-except-computed-vos: $(call FILTER_OUT,ComputedOf,$(PERF_VOLOGS)) \
+	$(PERF_MAKEFILE) \
+	src/Rewriter/PerfTesting/Core.vo \
+
+.PHONY: perf-only-computed-vos
+perf-only-computed-vos: $(call FILTER,ComputedOf,$(PERF_VOLOGS)) \
+	$(PERF_MAKEFILE) \
+	src/Rewriter/PerfTesting/Core.vo \
+
 perf-extraction: $(PERF_SHLOGS) \
 	$(PERF_MAKEFILE) \
 	perf-standalone
 
+.PHONY: perf perf-except-computed perf-only-computed
 perf: perf-extraction perf-vos
+perf-except-computed: perf-extraction perf-except-computed-vos
+perf-only-computed: perf-extraction perf-only-computed-vos
 
-.PHONE: perf-csv
-PERF_TXTS := perf-old-vm-times.txt perf-new-vm-times.txt perf-new-extraction-times.txt perf-old-cbv-times.txt \
-	perf-new-extraction-over-old-vm.txt perf-new-vm-over-old-vm.txt perf-old-vm-over-old-vm.txt \
-	perf-new-extraction-over-new-extraction.txt perf-new-vm-over-new-extraction.txt perf-old-vm-over-new-extraction.txt
+PERF_PRE_TXTS := perf-old-vm-times perf-new-vm-times perf-new-extraction-times perf-old-cbv-times \
+	perf-new-extraction-over-old-vm perf-new-vm-over-old-vm perf-old-vm-over-old-vm \
+	perf-new-extraction-over-new-extraction perf-new-vm-over-new-extraction perf-old-vm-over-new-extraction
+PERF_TXTS := $(addsuffix .txt,$(PERF_PRE_TXTS) \
+	$(foreach kind,UnsaturatedSolinas WordByWordMontgomery, \
+	$(foreach bitwidth,32 64, \
+	$(addsuffix --only-$(kind)-x$(bitwidth),$(PERF_PRE_TXTS)))))
+
+.PHONY: perf-csv
 perf-csv: perf.csv perf-graph.csv $(PERF_TXTS)
 
-perf.csv::
+.PHONY: perf.csv
+perf.csv:
 	$(SHOW)'PYTHON > $@'
 	$(HIDE)./src/Rewriter/PerfTesting/Specific/to_csv.py $(wildcard $(ALL_PERF_LOGS)) > $@.tmp
 	$(HIDE)sed 's/\r\n/\n/g; s/\r//g; s/\s*$$//g' $@.tmp > $@ && rm -f $@.tmp
 
-perf-graph.csv::
+.PHONY: perf-graph.csv
+perf-graph.csv:
 	$(SHOW)'PYTHON > $@'
 	$(HIDE)./src/Rewriter/PerfTesting/Specific/to_csv.py --for-graph $(wildcard $(ALL_PERF_LOGS)) > $@.tmp
 	$(HIDE)sed 's/\r\n/\n/g; s/\r//g; s/\s*$$//g' $@.tmp > $@ && rm -f $@.tmp
 
-$(PERF_TXTS) :: %.txt :
+.PHONY: $(PERF_TXTS)
+$(PERF_TXTS) : %.txt :
 	$(SHOW)'PYTHON > $@'
 	$(HIDE)./src/Rewriter/PerfTesting/Specific/to_csv.py --$* --txt $(wildcard $(ALL_PERF_LOGS)) > $@.tmp
 	$(HIDE)sed 's/\r\n/\n/g; s/\r//g; s/\s*$$//g' $@.tmp > $@ && rm -f $@.tmp
 
+# work around COQBUG(https://github.com/coq/coq/issues/10495)
+.PHONY: clean-tmp-native-work-around-bug-10495
+clean-tmp-native-work-around-bug-10495::
+	rm -f /tmp/Coq_native*.{cmi,cmx,cmxs,o,native}
+
 $(PERF_PRIME_VOS:.vo=.log) : %.log : %.v src/Rewriter/PerfTesting/Core.vo
 	$(SHOW)'PERF COQC $< > $@'
-	$(HIDE)$(TIMER_FULL) $(PERF_TIMEOUT) $(COQC) $(COQDEBUG) $(COQFLAGS) $(COQLIBS) $< > $@.tmp
+	$(HIDE)($(PERF_SET_LIMITS) $(TIMER_FULL) $(PERF_TIMEOUT) $(COQC) $(COQDEBUG) $(COQFLAGS) $(COQLIBS) $< && touch $@.ok) > $@.tmp
+	$(HIDE)rm $@.ok
 	$(HIDE)sed 's/\r\n/\n/g; s/\r//g; s/\s*$$//g' $@.tmp > $@ && rm -f $@.tmp
 
 $(PERF_PRIME_SHS:.sh=.log) : %.log : %.sh $(PERF_STANDALONE:%=src/ExtractionOCaml/%)
 	$(SHOW)'PERF SH $< > $@'
-	$(HIDE)$(TIMER_FULL) $(PERF_TIMEOUT) bash $< > $@.tmp
+	$(HIDE)($(PERF_SET_LIMITS) $(TIMER_FULL) $(PERF_TIMEOUT) bash $< && touch $@.ok) > $@.tmp
+	$(HIDE)rm $@.ok
 	$(HIDE)sed 's/\r\n/\n/g; s/\r//g; s/\s*$$//g' $@.tmp > $@ && rm -f $@.tmp
 
+
 curves: $(filter src/Spec/%Curve%.vo,$(REGULAR_VOFILES)) $(filter src/Curves/%.vo,$(REGULAR_VOFILES))
+
+.PHONY: $(CHECK_OUTPUTS) $(ACCEPT_OUTPUTS)
+check-output: $(CHECK_OUTPUTS)
+accept-output: $(ACCEPT_OUTPUTS)
+$(CHECK_OUTPUTS) : check-% : $(OUTPUT_VOS)
+	$(SHOW)'DIFF $*'
+	$(HIDE)diff $*.expected $*.out || (RV=$$?; echo "To accept the new output, run make accept-$*"; exit $$RV)
+
+$(ACCEPT_OUTPUTS) : accept-% :
+	$(SHOW)'ACCEPT $*.out'
+	$(HIDE)cp -f $*.out $*.expected
 
 clean::
 	rm -f Makefile.coq
