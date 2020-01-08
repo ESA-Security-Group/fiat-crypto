@@ -13,6 +13,7 @@ Require Import Crypto.Util.Strings.Show.
 Require Crypto.PushButtonSynthesis.SaturatedSolinas.
 Require Crypto.PushButtonSynthesis.UnsaturatedSolinas.
 Require Crypto.PushButtonSynthesis.WordByWordMontgomery.
+Require Crypto.PushButtonSynthesis.BaseConversion.
 Require Import Crypto.UnsaturatedSolinasHeuristics.
 Require Import Crypto.Stringification.Language.
 Require Import Crypto.Stringification.C.
@@ -50,10 +51,12 @@ Module ForExtraction.
   Definition parse_nat (s : string) : option nat
     := option_map N.to_nat (parse_N s).
   Definition parse_Q (s : string) : option Q
-    := match List.map parse_Z (String.split "/" s) with
-       | [Some num;Some (Zpos den)] => Some (Qmake num den)
-       | [Some num] => Some (Qmake num 1)
-       | _ => None
+    := match parseQ_arith s, List.map parse_Z (String.split "." s), List.map String.length (String.split "." s) with
+       | _, [Some int_part; Some dec_part], [_; digits]
+         => let den := 10 ^ (Z.of_nat digits) in
+            Some (Qmake (int_part * den + dec_part) (Z.to_pos den))
+       | Some num, _, _ => Some num
+       | _, _, _ => None
        end.
   Definition parse_bool (s : string) : option bool
     := if string_dec s "true"
@@ -89,6 +92,13 @@ Module ForExtraction.
     := parse_Z s.
   Definition parse_m (s : string) : option Z
     := parseZ_arith s.
+
+  Definition parse_src_n : string -> option nat := parse_nat.
+  Definition parse_limbwidth : string -> option Q := parse_Q.
+  Definition parse_max (s : string) : option (option Z)
+    := option_map (@Some _) (parseZ_arith s).
+  Definition parse_inbounds_multiplier (s : string) : option (option Q)
+    := option_map (@Some _) (parse_Q s).
 
   Definition show_c : Show (list (Z * Z))
     := @show_list _ (@show_prod _ _ PowersOfTwo.show_Z Decimal.show_Z).
@@ -142,8 +152,16 @@ Module ForExtraction.
        "                            Valid options are: " ++ String.concat ", " (List.map (@fst _ _) supported_languages).
   Definition static_help
     := "  --static                Declare the functions as static, i.e., local to the file.".
+  Definition no_wide_int_help
+    := "  --no-wide-int           Don't use integers wider than the bitwidth.".
+  Definition widen_carry_help
+    := "  --widen-carry           Widen carry bit integer types to either the byte type, or to the full bitwidth if --widen-bytes is also passed.".
+  Definition widen_bytes_help
+    := "  --widen-bytes           Widen byte types to the full bitwidth.".
   Definition no_primitives_help
     := "  --no-primitives         Suppress the generation of the bodies of primitive operations such as addcarryx, subborrowx, cmovznz, mulx, etc.".
+  Definition cmovznz_by_mul_help
+    := "  --cmovznz-by-mul        Use an alternative implementation of cmovznz using multiplication rather than bitwise-and with -1.".
   Definition n_help
     := "  n                       The number of limbs, or the literal '(auto)' or '(autoN)' for a non-negative number N, to automatically guess the number of limbs".
   Definition sc_help
@@ -152,6 +170,17 @@ Module ForExtraction.
     := "  m                       The prime (e.g., '2^434 - (2^216*3^137 - 1)')".
   Definition machine_wordsize_help
     := "  machine_wordsize        The machine bitwidth (e.g., 32 or 64)".
+  Definition src_n_help
+    := "  src_n                   The number of limbs in the input".
+  Definition src_limbwidth_help
+    := "  src_limbwidth           The limbwidth of the input field element".
+  Definition dst_limbwidth_help
+    := "  dst_limbwidth           The limbwidth of the field element to be returned".
+  Definition max_help
+    := "  max                     The upperbound (strict / exclusive) on the input field element".
+  Definition inbounds_multiplier_help
+    := "  inbounds_multiplier     The (improper) fraction by which the bounds of each limb are scaled".
+
   Definition function_to_synthesize_help (valid_names : string)
     := "  function_to_synthesize  A space-separated list of functions that should be synthesized.  If no functions are given, all functions are synthesized."
          ++ String.NewLine ++
@@ -218,13 +247,14 @@ Module ForExtraction.
 
       (** Should we emit primitive operations *)
       ; emit_primitives :> emit_primitives_opt
-
+      (** Should we use the alternate implementation of cmovznz *)
+      ; use_mul_for_cmovznz :> use_mul_for_cmovznz_opt
       (** Should we split apart oversized operations? *)
-      ; should_split_mul :> should_split_mul_opt := false
+      ; should_split_mul :> should_split_mul_opt
       (** Should we widen the carry to the full bitwidth? *)
-      ; widen_carry :> widen_carry_opt := false
+      ; widen_carry :> widen_carry_opt
       (** Should we widen the byte type to the full bitwidth? *)
-      ; widen_bytes :> widen_bytes_opt := false
+      ; widen_bytes :> widen_bytes_opt
     }.
 
   (** We define a class for the various operations that are specific to a pipeline *)
@@ -346,11 +376,15 @@ Module ForExtraction.
                match argv with
                | nil => error ["empty argv"]
                | prog::args
-                 => error ((["USAGE: " ++ prog ++ " [--lang=LANGUAGE] [--static] [--no-primitives] curve_description " ++ pipeline_usage_string;
+                 => error ((["USAGE: " ++ prog ++ " [--lang=LANGUAGE] [--static] [--no-wide-int] [--widen-carry] [--widen-bytes] [--no-primitives] [--cmovznz-by-mul] curve_description " ++ pipeline_usage_string;
                                "Got " ++ show false (List.length args) ++ " arguments.";
                                "";
                                lang_help;
                                static_help;
+                               cmovznz_by_mul_help;
+                               no_wide_int_help;
+                               widen_carry_help;
+                               widen_bytes_help;
                                no_primitives_help;
                                curve_description_help]%string)
                              ++ help_lines
@@ -358,6 +392,10 @@ Module ForExtraction.
                end in
            let '(argv, output_language_api) := argv_to_language_and_argv argv in
            let '(argv, staticv) := argv_to_contains_opt_and_argv "--static" argv in
+           let '(argv, no_wide_intsv) := argv_to_contains_opt_and_argv "--no-wide-int" argv in
+           let '(argv, use_mul_for_cmovznzv) := argv_to_contains_opt_and_argv "--cmovznz-by-mul" argv in
+           let '(argv, widen_carryv) := argv_to_contains_opt_and_argv "--widen-carry" argv in
+           let '(argv, widen_bytesv) := argv_to_contains_opt_and_argv "--widen-bytes" argv in
            let '(argv, no_primitivesv) := argv_to_contains_opt_and_argv "--no-primitives" argv in
            match argv with
            | _::curve_description::args
@@ -365,6 +403,10 @@ Module ForExtraction.
                 | Some (inl args)
                   => let opts
                          := {| static := staticv
+                               ; use_mul_for_cmovznz := use_mul_for_cmovznzv
+                               ; widen_carry := widen_carryv
+                               ; widen_bytes := widen_bytesv
+                               ; should_split_mul := no_wide_intsv
                                ; emit_primitives := negb no_primitivesv |} in
                      Pipeline curve_description args success error
                 | Some (inr errs)
@@ -533,4 +575,67 @@ Module ForExtraction.
       : A
       := Parameterized.PipelineMain argv success error.
   End SaturatedSolinas.
+
+  Module BaseConversion.
+    Local Instance api : PipelineAPI
+      := {
+          parse_args (args : list string)
+          := match args with
+             | src_n::src_limbwidth::dst_limbwidth::machine_wordsize::max::inbounds_multiplier::requests
+               => let str_src_n := src_n in
+                  let str_src_limbwidth := src_limbwidth in
+                  let str_dst_limbwidth := dst_limbwidth in
+                  let str_machine_wordsize := machine_wordsize in
+                  let str_max := max in
+                  let str_inbounds_multiplier := inbounds_multiplier in
+                  let show_requests := match requests with nil => "(all)" | _ => String.concat ", " requests end in
+                  Some
+                    match parse_many [("src_n", src_n, parse_src_n src_n:Dyn)
+                                      ; ("src_limbwidth", src_limbwidth, parse_limbwidth src_limbwidth:Dyn)
+                                      ; ("dst_limbwidth", dst_limbwidth, parse_limbwidth dst_limbwidth:Dyn)
+                                      ; ("machine_wordsize", machine_wordsize, parse_machine_wordsize machine_wordsize:Dyn)
+                                      ; ("max", max, parse_max max:Dyn)
+                                      ; ("inbounds_multiplier", inbounds_multiplier, parse_inbounds_multiplier inbounds_multiplier:Dyn)] with
+                    | inr errs => inr errs
+                    | inl (src_n, src_limbwidth, dst_limbwidth, machine_wordsize, max, inbounds_multiplier)
+                      => inl ((str_src_n, str_src_limbwidth, str_dst_limbwidth, str_machine_wordsize, str_max, str_inbounds_multiplier, show_requests),
+                              (src_n, src_limbwidth, dst_limbwidth, machine_wordsize, max, inbounds_multiplier, requests))
+                    end
+             | _ => None
+             end;
+
+          show_lines_args :=
+            fun '((str_src_n, str_src_limbwidth, str_dst_limbwidth, str_machine_wordsize, str_max, str_inbounds_multiplier, show_requests),
+                  (src_n, src_limbwidth, dst_limbwidth, machine_wordsize, max, inbounds_multiplier, requests))
+            => ["requested operations: " ++ show_requests;
+                  "src_n = " ++ show false src_n ++ " (from """ ++ str_src_n ++ """)";
+                  "src_limbwidth = " ++ show false src_limbwidth ++ " (from """ ++ str_src_limbwidth ++ """)";
+                  "dst_limbwidth = " ++ show false dst_limbwidth ++ " (from """ ++ str_dst_limbwidth ++ """)";
+                  "machine_wordsize = " ++ show false machine_wordsize ++ " (from """ ++ str_machine_wordsize ++ """)";
+                  "max = " ++ @show_option _ PowersOfTwo.show_Z false max ++ " (from """ ++ str_max ++ """)";
+                  "inbounds_multiplier = " ++ show false inbounds_multiplier ++ " (from """ ++ str_inbounds_multiplier ++ """)"];
+
+          pipeline_usage_string := "src_n src_limbwidth dst_limbwidth machine_wordsize max inbounds_multiplier [function_to_synthesize*]";
+
+          help_lines := [src_n_help;
+                           src_limbwidth_help;
+                           dst_limbwidth_help;
+                           machine_wordsize_help;
+                           max_help;
+                           inbounds_multiplier_help;
+                           function_to_synthesize_help BaseConversion.valid_names];
+
+          Synthesize
+          := fun _ opts '(src_n, src_limbwidth, dst_limbwidth, machine_wordsize, max, inbounds_multiplier, requests) comment_header prefix
+             => BaseConversion.Synthesize src_n src_limbwidth dst_limbwidth machine_wordsize max inbounds_multiplier comment_header prefix requests
+        }.
+
+    Definition PipelineMain
+               {A}
+               (argv : list string)
+               (success : list string -> A)
+               (error : list string -> A)
+      : A
+      := Parameterized.PipelineMain argv success error.
+  End BaseConversion.
 End ForExtraction.

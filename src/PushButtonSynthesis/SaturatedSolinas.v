@@ -60,13 +60,16 @@ Local Opaque expr.Interp.
 Section __.
   Context {output_language_api : ToString.OutputLanguageAPI}
           {static : static_opt}
+          {use_mul_for_cmovznz : use_mul_for_cmovznz_opt}
           {emit_primitives : emit_primitives_opt}
           {should_split_mul : should_split_mul_opt}
           {widen_carry : widen_carry_opt}
-          {widen_bytes : widen_bytes_opt}
+          (widen_bytes : widen_bytes_opt := true) (* true, because we don't allow byte-sized things anyway, so we should not expect carries to be widened to byte-size when emitting C code *)
           (s : Z)
           (c : list (Z * Z))
           (machine_wordsize : Z).
+
+  Local Existing Instance widen_bytes.
 
   (* We include [0], so that even after bounds relaxation, we can
        notice where the constant 0s are, and remove them. *)
