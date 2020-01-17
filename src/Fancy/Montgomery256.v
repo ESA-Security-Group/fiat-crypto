@@ -257,6 +257,7 @@ Local Notation "i rd x y z ; cont" := (Instr i rd (x, y, z) cont) (at level 40, 
 
 (* Montgomery reference code : *)
 Local Set Printing Width 150.
+Local Unset Fast Name Printing.
 Redirect "Crypto.Fancy.Montgomery256.Prod.MontRed256" Eval cbv beta iota delta [Prod.MontRed256 Prod.Mul256 Prod.Mul256x256] in Prod.MontRed256.
 (*
      = fun lo hi y t1 t2 scratch RegPInv : register =>
@@ -281,10 +282,8 @@ Redirect "Crypto.Fancy.Montgomery256.Prod.MontRed256" Eval cbv beta iota delta [
        Ret lo
  *)
 
-(* Uncomment to see proof statement and remaining admitted statements,
+(* Remove Redirect to see proof statement and remaining admitted statements,
 or search for "prod_montred256_correct" to see comments on the proof
 preconditions. *)
-(*
-Check Montgomery256.prod_montred256_correct.
-Print Assumptions Montgomery256.prod_montred256_correct.
-*)
+Redirect "Crypto.Fancy.Montgomery256.prod_montred256_correct" Check Montgomery256.prod_montred256_correct.
+Redirect "Crypto.Fancy.Montgomery256.prod_montred256_correct.Assumptions" Print Assumptions Montgomery256.prod_montred256_correct.
